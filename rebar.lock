@@ -1,0 +1,18 @@
+{"1.1.0",
+[{<<"bloom">>,
+  {git,"https://github.com/Vagabond/erbloom",
+       {ref,"ed65adf8c34c055e62701e8feb680777de5f7de7"}},
+  0},
+ {<<"exor_filter">>,
+  {git,"http://github.com/Vagabond/exor_filter",
+       {ref,"02b1c16aa9432a92ecefa680174572d1a996eb5c"}},
+  0},
+ {<<"rocksdb">>,{pkg,<<"rocksdb">>,<<"1.2.0">>},0},
+ {<<"xxhash">>,
+  {git,"https://github.com/pierreis/erlang-xxhash",
+       {ref,"21a7c761aaef2abb4d390c6ca5d47df6c646e9e4"}},
+  0}]}.
+[
+{pkg_hash,[
+ {<<"rocksdb">>, <<"5679E2289E4BE1E0F53021D898E974B31F2CF0B3A3CEC83529B7766D45F90FAF">>}]}
+].
