@@ -5,7 +5,7 @@
   0},
  {<<"exor_filter">>,
   {git,"http://github.com/Vagabond/exor_filter",
-       {ref,"02b1c16aa9432a92ecefa680174572d1a996eb5c"}},
+       {ref,"c8468eb39b4eb394ddfae358627d65d4e1e920d2"}},
   0},
  {<<"rocksdb">>,{pkg,<<"rocksdb">>,<<"1.2.0">>},0},
  {<<"xxhash">>,

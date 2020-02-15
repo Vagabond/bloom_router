@@ -1,6 +1,6 @@
 -module(bloom_router).
 
--export([start/0]).
+-export([start/3]).
 
 %-define(XORType, xor8).
 -define(XORType, xor16).
@@ -8,43 +8,106 @@
 %-define(XORHash, fun erlang:phash2/1).
 -define(XORHash, fun xxhash:hash64/1).
 
-start() ->
-    Path = "/tmp/bloom_router.db",
+start(Type, NumOUIs, NumDevices) when NumDevices > NumOUIs ->
+    case Type of
+        bloom ->
+            XorType = undefined,
+            XorHash = undefined,
+            ok;
+        xor8_phash ->
+            XorType = xor8,
+            XorHash = fun erlang:phash2/1;
+        xor8_xxhash ->
+            XorType = xor8,
+            XorHash = fun xxhash:hash64/1;
+        xor16_phash ->
+            XorType = xor16,
+            XorHash = fun erlang:phash2/1;
+        xor16_xxhash ->
+            XorType = xor16,
+            XorHash = fun xxhash:hash64/1
+    end,
+    io:format("~nrunning ~p with ~p OUIs and ~p Devices~n", [Type, NumOUIs, NumDevices]),
+    Path = lists:flatten(io_lib:format("/tmp/bloom_router-~s-~b-~b.db", [Type, NumOUIs, NumDevices])),
     Options = [{create_if_missing, true}],
-    rocksdb:destroy(Path, Options),
     {ok, DB} = rocksdb:open(Path, Options),
-    io:format("generating OUIs~n"),
-    NumOUIs    = 10000,
-    NumDevices = 8000000,
-    NumTrials  = 200,
-    OUIsAndDeviceCounts = [ {OUI, rand:uniform(1000000)} || OUI <- lists:seq(1, NumOUIs) ],
-    io:format("generated ~p OUIs holding ~p devices~n", [NumOUIs, lists:sum(element(2, lists:unzip(OUIsAndDeviceCounts)))]),
-    io:format("generating ~p devices~n", [NumDevices]),
-    DevicesWithOUIs = [ {rand:uniform(4294967296), rand:uniform(NumOUIs)} || _ <- lists:seq(1, NumDevices) ],
-    io:format("populating ~p OUIs with ~p devices~n", [NumOUIs, NumDevices]),
-    pmap(fun({OUI, Count}) ->
-                 %{ok, Bloom} = bloom:new_for_fp_rate(Count, 0.000000005),
-                 %[ bloom:set(Bloom, <<Device:32/integer-unsigned-big>>) || {Device, OUI0} <- DevicesWithOUIs, OUI0 == OUI ],
-                 %rocksdb:put(DB, <<OUI:32/integer-unsigned-big>>, bloom:to_bin(Bloom), [])
-                 Xor = ?XORType:new(lists:usort([Device || {Device, OUI0} <- DevicesWithOUIs, OUI0 == OUI ]), ?XORHash),
-                 rocksdb:put(DB, <<OUI:32/integer-unsigned-big>>,?XORType:to_bin(Xor), [])
-         end, OUIsAndDeviceCounts),
-    io:format("compacting DB~n"),
-    rocksdb:compact_range(DB, undefined, undefined, []),
-    timer:sleep(5000),
-    io:format("Attempting ~p random lookups~n", [NumTrials]),
-    RandomDevices = [ lists:nth(rand:uniform(NumDevices), DevicesWithOUIs) || _ <- lists:seq(1, NumTrials)],
-    {Misses, Times, Errors} = lists:unzip3([ trial(DB, E) || E <- RandomDevices]),
-    io:format("Average errors ~p, max ~p, min ~p~n", [lists:sum(Errors)/NumTrials, lists:max(Errors), lists:min(Errors)]),
-    io:format("Average lookup ~p, max ~p, min ~p~n", [(lists:sum(Times)/NumTrials) / 1000000, lists:max(Times) / 1000000, lists:min(Times) / 1000000]),
-    io:format("Lookup misses ~p~n", [lists:sum(Misses)]),
+    RandomDevices = case rocksdb:get(DB, <<"randomdevices">>, []) of
+        not_found ->
+            io:format("generating OUIs~n"),
+            NumTrials  = 1000,
+            %OUIsAndDeviceCounts = [ {OUI, rand:uniform(1000000)} || OUI <- lists:seq(1, NumOUIs) ],
+            OUIs = lists:seq(1, NumOUIs),
+            %io:format("generated ~p OUIs holding ~p devices~n", [NumOUIs, lists:sum(element(2, lists:unzip(OUIsAndDeviceCounts)))]),
+            io:format("generated ~p OUIs~n", [NumOUIs]),
+            io:format("generating ~p devices~n", [NumDevices]),
+            DevicesWithOUIs = [ {rand:uniform(4294967296), rand:uniform(NumOUIs)} || _ <- lists:seq(1, NumDevices) ],
+            io:format("populating ~p OUIs with ~p devices~n", [NumOUIs, NumDevices]),
+            %pmap(fun({OUI, Count}) ->
+            pmap(fun(OUI) ->
+                         case Type of
+                             bloom ->
+                                 DevicesForThisOUI = [Device || {Device, OUI0} <- DevicesWithOUIs, OUI0 == OUI ],
+                                 %% build a bloom for this exact capacity
+                                 {ok, Bloom} = bloom:new_for_fp_rate(length(DevicesForThisOUI), 0.000000005),
+                                 [ bloom:set(Bloom, <<Device:32/integer-unsigned-big>>) || Device <- DevicesForThisOUI ],
+                                 rocksdb:put(DB, <<OUI:32/integer-unsigned-big>>, bloom:to_bin(Bloom), []);
+                             _ ->
+                                 Xor = XorType:new(lists:usort([Device || {Device, OUI0} <- DevicesWithOUIs, OUI0 == OUI ]), XorHash),
+                                 rocksdb:put(DB, <<OUI:32/integer-unsigned-big>>, XorType:to_bin(Xor), [])
+                         end
+                 end, OUIs),
+            io:format("compacting DB~n"),
+            rocksdb:compact_range(DB, undefined, undefined, []),
+            timer:sleep(5000),
+            io:format("Attempting ~p random lookups~n", [NumTrials]),
+            RD = [ lists:nth(rand:uniform(NumDevices), DevicesWithOUIs) || _ <- lists:seq(1, NumTrials)],
+            rocksdb:put(DB, <<"randomdevices">>, term_to_binary(RD), []),
+            RD;
+        {ok, BRD} ->
+            RD = binary_to_term(BRD),
+            NumTrials = length(RD),
+            io:format("Attempting ~p random lookups~n", [NumTrials]),
+            RD
+    end,
+
+    Parent = self(),
+    Fun = fun F(Acc) ->
+    receive done ->
+                Parent ! {memory, Acc}
+    after 10 ->
+              F([element(2, hd(erlang:memory()))|Acc])
+    end
+      end,
+    MonPid = spawn(fun() -> Fun([]) end),
+    {Misses, Times, Errors} = lists:unzip3([ trial(DB, E, Type, XorType, XorHash) || E <- RandomDevices]),
+    MonPid ! done,
+    receive {memory, Memory} ->
+                io:format("Average memory ~.2fMb, max ~.2fMb, min ~.2fMb~n", [(lists:sum(Memory)/length(Memory))/(1024*1024), lists:max(Memory)/(1024*1024), lists:min(Memory)/(1024*1024)])
+    end,
+    [Size] = rocksdb:get_approximate_sizes(DB, [{<<0:32/integer-unsigned-big>>, <<(NumOUIs+1):32/integer-unsigned-big>>}], include_files),
+    io:format("Approximate database size ~.2fMb~n", [Size/(1024*1024)]),
+    io:format("Average errors ~.3f, max ~p, min ~p~n", [lists:sum(Errors)/NumTrials, lists:max(Errors), lists:min(Errors)]),
+    io:format("Average lookup ~.3fs, max ~.3fs, min ~.3fs~n", [(lists:sum(Times)/NumTrials) / 1000000, lists:max(Times) / 1000000, lists:min(Times) / 1000000]),
+    io:format("Lookup misses ~p~n~n", [lists:sum(Misses)]),
+    rocksdb:close(DB),
+    erlang:garbage_collect(),
     ok.
 
-trial(DB, {Device, OUI}) ->
+trial(DB, {Device, OUI}, Type, XorType, XorHash) ->
     {ok, Itr} = rocksdb:iterator(DB, []),
-    {Time, Res} = timer:tc(fun() -> check(Itr, rocksdb:iterator_move(Itr, first), Device, []) end),
+    Fun = case Type of
+              bloom ->
+                  fun(B) ->
+                      bloom:check(B, <<Device:32/integer-unsigned-big>>)
+                  end;
+              _ ->
+                  fun(B) ->
+                      XorType:contain(XorType:from_bin(B, XorHash), Device)
+                  end
+          end,
+    {Time, Res} = timer:tc(fun() -> check(Itr, rocksdb:iterator_move(Itr, first), Fun, []) end),
     rocksdb:iterator_close(Itr),
-    io:format("Device ~.16b was found in ~p OUIs in ~p seconds, found correct OUI ~p~n", [Device, length(Res), Time / 1000000, lists:member(OUI, Res)]),
+    %io:format("Device ~.16b was found in ~p OUIs in ~p seconds, found correct OUI ~p~n", [Device, length(Res), Time / 1000000, lists:member(OUI, Res)]),
     case lists:member(OUI, Res) of
         true ->
             {0, Time, length(Res) - 1};
@@ -52,17 +115,18 @@ trial(DB, {Device, OUI}) ->
             {1, Time, length(Res)}
     end.
 
-check(_Itr, {error, E}, _Device, Acc) ->
+check(_Itr, {error, _E}, _Fun, Acc) ->
     Acc;
-check(Itr, {ok, <<OUI:32/integer-unsigned-big>>, B}, Device, Acc0) ->
-    %Acc = case bloom:check(B, <<Device:32/integer-unsigned-big>>) of
-    Acc = case ?XORType:contain(?XORType:from_bin(B, ?XORHash), Device) of
+check(Itr, {ok, <<"randomdevices">>, _}, Fun, Acc0) ->
+    check(Itr, rocksdb:iterator_move(Itr, next), Fun, Acc0);
+check(Itr, {ok, <<OUI:32/integer-unsigned-big>>, B}, Fun, Acc0) ->
+    Acc = case Fun(B) of
         true ->
             [OUI | Acc0];
         false ->
             Acc0
     end,
-    check(Itr, rocksdb:iterator_move(Itr, next), Device, Acc).
+    check(Itr, rocksdb:iterator_move(Itr, next), Fun, Acc).
 
 pmap(F, L) ->
     Width = erlang:system_info(schedulers) + 2,
