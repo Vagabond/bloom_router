@@ -78,11 +78,16 @@ start(Type, NumOUIs, NumDevices) when NumDevices > NumOUIs ->
               F([element(2, hd(erlang:memory()))|Acc])
     end
       end,
+    erlang:garbage_collect(),
+    BaselineMemory = element(2, hd(erlang:memory())),
+
     MonPid = spawn(fun() -> Fun([]) end),
     {Misses, Times, Errors} = lists:unzip3([ trial(DB, E, Type, XorType, XorHash) || E <- RandomDevices]),
     MonPid ! done,
     receive {memory, Memory} ->
-                io:format("Average memory ~.2fMb, max ~.2fMb, min ~.2fMb~n", [(lists:sum(Memory)/length(Memory))/(1024*1024), lists:max(Memory)/(1024*1024), lists:min(Memory)/(1024*1024)])
+                io:format("Average memory ~.2fMb, max ~.2fMb, min ~.2fMb~n", [((lists:sum(Memory)/length(Memory)) - BaselineMemory)/(1024*1024),
+                                                                              (lists:max(Memory) - BaselineMemory)/(1024*1024),
+                                                                              (lists:min(Memory) - BaselineMemory)/(1024*1024)])
     end,
     [Size] = rocksdb:get_approximate_sizes(DB, [{<<0:32/integer-unsigned-big>>, <<(NumOUIs+1):32/integer-unsigned-big>>}], include_files),
     io:format("Approximate database size ~.2fMb~n", [Size/(1024*1024)]),
