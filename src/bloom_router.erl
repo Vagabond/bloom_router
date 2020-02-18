@@ -108,7 +108,7 @@ trial(DB, {Device, OUI}, Type, XorType, XorHash) ->
                   end;
               _ ->
                   fun(B) ->
-                      XorType:contain(XorType:from_bin(B, XorHash), Device)
+                      XorType:contain({B, XorHash}, Device)
                   end
           end,
     {Time, Res} = timer:tc(fun() -> check(Itr, rocksdb:iterator_move(Itr, first), Fun, []) end),
