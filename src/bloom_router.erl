@@ -91,9 +91,9 @@ start(Type, NumOUIs, NumDevices) when NumDevices > NumOUIs ->
                                                                               (Min - BaselineMemory)/(1024*1024)])
     end,
     [Size] = rocksdb:get_approximate_sizes(DB, [{<<0:32/integer-unsigned-big>>, <<(NumOUIs+1):32/integer-unsigned-big>>}], include_files),
-    io:format("Approximate database size ~.2fMb~n", [Size/(1024*1024)]),
-    io:format("Average errors ~.3f, max ~p, min ~p~n", [lists:sum(Errors)/NumTrials, lists:max(Errors), lists:min(Errors)]),
-    io:format("Average lookup ~.3fs, max ~.3fs, min ~.3fs~n", [(lists:sum(Times)/NumTrials) / 1000000, lists:max(Times) / 1000000, lists:min(Times) / 1000000]),
+    io:format("Approximate database size ~sMb~n", [sigfigs(Size/(1024*1024), 2)]),
+    io:format("Average errors ~s, max ~p, min ~p~n", [sigfigs(lists:sum(Errors)/NumTrials, 2), lists:max(Errors), lists:min(Errors)]),
+    io:format("Average lookup ~ss, max ~ss, min ~ss~n", [sigfigs((lists:sum(Times)/NumTrials) / 1000000, 2), sigfigs(lists:max(Times) / 1000000, 2), sigfigs(lists:min(Times) / 1000000, 2)]),
     io:format("Lookup misses ~p~n~n", [lists:sum(Misses)]),
     rocksdb:close(DB),
     erlang:garbage_collect(),
@@ -168,3 +168,18 @@ partition_list(L, [0 | T], Acc) ->
 partition_list(L, [H | T], Acc) ->
     {Take, Rest} = lists:split(H, L),
     partition_list(Rest, T, [Take | Acc]).
+
+%% this is a lazy hack, but it does the job
+sigfigs(Float, NumFigs) ->
+    sigfigs(Float, NumFigs, 1).
+
+sigfigs(0.0, _, _) ->
+    "0";
+sigfigs(Float, NumFigs, Precision) ->
+    S = lists:flatten(io_lib:format("\~."++ integer_to_list(Precision) ++ "f", [Float])),
+    case length(string:strip(S, both, $0)) >= NumFigs of
+        true ->
+            S;
+        false ->
+            sigfigs(Float, NumFigs, Precision+1)
+    end.
