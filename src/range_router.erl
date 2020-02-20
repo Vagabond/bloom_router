@@ -58,7 +58,7 @@ start(NumOUIs, NumDevices) ->
                                                                               (Max - BaselineMemory)/(1024*1024),
                                                                               (Min - BaselineMemory)/(1024*1024)])
     end,
-    [Size] = rocksdb:get_approximate_sizes(DB, [{<<0:32/integer-unsigned-big>>, <<(NumOUIs+1):32/integer-unsigned-big>>}], include_files),
+    [Size] = rocksdb:get_approximate_sizes(DB, [{<<0:32/integer-unsigned-big>>, <<(NumDevices+1):32/integer-unsigned-big>>}], include_files),
     io:format("Approximate database size ~sMb~n", [sigfigs(Size/(1024*1024), 2)]),
     %io:format("Average errors ~s, max ~p, min ~p~n", [sigfigs(lists:sum(Errors)/NumTrials, 2), lists:max(Errors), lists:min(Errors)]),
     io:format("Average lookup ~ss, max ~ss, min ~ss~n", [sigfigs((lists:sum(Times)/NumTrials) / 1000000, 2), sigfigs(lists:max(Times) / 1000000, 2), sigfigs(lists:min(Times) / 1000000, 2)]),
